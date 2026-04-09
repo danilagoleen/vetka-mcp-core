@@ -283,6 +283,8 @@ TASK_BOARD_SCHEMA = {
                 "agent_activity",
                 "remember",
                 "recall",
+                "pin",
+                "unpin",
             ],
             "description": "Operation to perform",
         },
@@ -549,6 +551,18 @@ TASK_BOARD_SCHEMA = {
         "expires_at": {
             "type": "string",
             "description": "ISO datetime after which memory is stale (optional)",
+        },
+        "context_summary": {
+            "description": "Handoff context summary for pin",
+            "type": "string",
+        },
+        "files_modified": {
+            "description": "Comma-separated files modified (for pin handoff)",
+            "type": "string",
+        },
+        "next_steps": {
+            "description": "Next steps for resuming work (for pin handoff)",
+            "type": "string",
         },
     },
     "required": ["action"],
@@ -1900,6 +1914,31 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
             query=query,
             limit=limit,
         )
+
+    elif action == "pin":
+        _role = arguments.get("role", arguments.get("source_role", ""))
+        _task_id = arguments.get("task_id", "")
+        if not _role or not _task_id:
+            return _err("action=pin requires role and task_id")
+        result = board.pin(
+            role_id=_role,
+            task_id=_task_id,
+            context_summary=arguments.get("context_summary", ""),
+            files_modified=[f.strip() for f in arguments.get("files_modified", "").split(",") if f.strip()] if isinstance(arguments.get("files_modified", ""), str) else arguments.get("files_modified", []),
+            next_steps=arguments.get("next_steps", ""),
+        )
+        return _ok(result)
+
+    elif action == "unpin":
+        _role = arguments.get("role", arguments.get("source_role", ""))
+        _task_id = arguments.get("task_id", "")
+        if not _role:
+            return _err("action=unpin requires role")
+        result = board.unpin(
+            role_id=_role,
+            task_id=_task_id,
+        )
+        return _ok(result)
 
     # MARKER_206.SYNAPSE: Commander-facing spawn/write/wake/status/kill
     elif action == "spawn":

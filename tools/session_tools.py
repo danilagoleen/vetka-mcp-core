@@ -63,16 +63,28 @@ _SECTION_TIERS: Dict[str, int] = {
     "user_id": 1, "group_id": 1, "initialized": 1, "initialized_at": 1,
     "current_phase": 1, "role_context": 1, "protocol_status": 1,
     "persisted": 1, "user_preferences": 1,
+    "pinned_tasks": 1,  # MARKER_PHASE8.PINNED_TASKS: Always shown in init
     # T2: Important context
     "task_board_summary": 2, "engram_learnings": 2, "next_steps": 2,
     "my_focus": 2, "project_digest": 2, "role_memory": 2,
+    "notifications": 2, "predecessor_advice": 2,
     # T3: Enrichment
     "reflex_recommendations": 3, "reflex_warnings": 3, "blocked_tools": 3,
     "semantic_lessons": 3, "jepa_session_lens": 3, "capabilities": 3,
     "context_hints": 3,
+    "recent_commits": 3, "reflex_emotions": 3, "mgc_status": 3,
     # T4: Specialist / diagnostic
     "digest": 4, "memory_health": 4, "agent_metrics": 4, "reflex_report": 4,
     "freshness_events": 4, "other_agents": 4,
+    "_cam_engram_context": 4,  # MARKER_210.BUDGET: Was unclassified, bypassed enforcement
+    "latest_feedback": 4,       # MARKER_210.BUDGET: Was unclassified, bypassed enforcement
+    "_all_agent_focus": 4, "_elision": 4, "agent_instructions": 4,
+    "auto_provision": 4, "context_budget_alert": 4,
+    "viewport": 4, "viewport_summary": 4, "viewport_patterns": 4, "viewport_error": 4,
+    "pinned": 4, "pinned_context": 4, "pinned_error": 4,
+    "role_error": 4, "role_generator_hint": 4, "persist_error": 4,
+    "recent_states_count": 4, "recent_state_ids": 4, "recent_states_error": 4,
+    "communication_style": 4, "restored_checkpoint": 4,
 }
 
 # Approximate token estimation: ~4 chars per token for JSON
@@ -176,46 +188,47 @@ def _apply_token_budget(
     if role_callsign and role_callsign != "Zeta":
         context.pop("freshness_events", None)
 
-    # --- Layer 2: Tier gate — progressive section drop ---
+    # --- Layer 2: Progressive budget gate ---
+    # MARKER_PHASE8.PROGRESSIVE_BUILD: Instead of post-hoc drops,
+    # keep only what fits within budget, prioritized by tier.
     current_tokens = _estimate_tokens(context)
     if current_tokens <= max_tokens:
         return context
 
-    # MARKER_210.BUDGET_FIX: Unclassified keys default to T4 (droppable).
-    # Previous bug: keys not in _SECTION_TIERS bypassed enforcement entirely,
-    # causing Delta (haiku, 4000 token budget) to hit 99.7% every init.
-    _T1_IMMUNE = {"session_id", "chat_id", "linked", "linked_to_existing",
-                   "user_id", "group_id", "initialized", "initialized_at"}
+    # Classify all keys by tier (unclassified = T4)
+    _T1_IMMUNE = {k for k, t in _SECTION_TIERS.items() if t == 1}
+    tiered_keys: Dict[int, list] = {1: [], 2: [], 3: [], 4: []}
+    for k in list(context.keys()):
+        tier = _SECTION_TIERS.get(k, 4)
+        tiered_keys.setdefault(tier, []).append(k)
 
     # Drop tiers from T4 down until within budget
     for tier_to_drop in (4, 3):
         if current_tokens <= max_tokens:
             break
-        keys_to_drop = []
-        for k in list(context.keys()):
-            tier = _SECTION_TIERS.get(k, 4)  # unclassified = T4
-            if tier == tier_to_drop and k not in _T1_IMMUNE:
-                keys_to_drop.append(k)
-        for key in keys_to_drop:
+        for key in tiered_keys.get(tier_to_drop, []):
+            if key in _T1_IMMUNE:
+                continue
             context.pop(key, None)
         current_tokens = _estimate_tokens(context)
 
     # If still over budget after dropping T3+T4, truncate T2 list sections
     if current_tokens > max_tokens:
-        # Truncate task_board_summary lists
         tbs = context.get("task_board_summary", {})
         for list_key in ("top_pending", "in_progress", "awaiting_merge", "qa_queue"):
             if tbs.get(list_key):
                 tbs[list_key] = tbs[list_key][:3]
-        # Truncate engram to 1 per category
         el = context.get("engram_learnings", {})
         for cat in ("dangers", "architecture", "patterns"):
             if el.get(cat) and isinstance(el[cat], list):
                 el[cat] = el[cat][:1]
-        # Truncate next_steps
         ns = context.get("next_steps")
         if ns and isinstance(ns, list):
             context["next_steps"] = ns[:3]
+        # Truncate pinned_tasks to 3 if still over
+        pt = context.get("pinned_tasks")
+        if pt and isinstance(pt, list) and len(pt) > 3:
+            context["pinned_tasks"] = pt[:3]
 
     return context
 
@@ -965,6 +978,15 @@ class SessionInitTool(BaseMCPTool):
                     board.ack_notifications(_role, notification_ids=[n["id"] for n in _notifs])
         except Exception:
             pass  # Notifications optional — don't block session_init
+
+        # MARKER_PHASE8.PINNED_TASKS: Load pinned tasks for T1 (always shown in init)
+        try:
+            _pin_role = context.get("role_context", {}).get("callsign", "") or role_name
+            _pinned_tasks = board.get_pinned_tasks(role_id=_pin_role, limit=5)
+            if _pinned_tasks:
+                context["pinned_tasks"] = _pinned_tasks
+        except Exception as _pin_err:
+            logger.debug("[session_init] pinned_tasks load failed: %s", _pin_err)
 
         # MARKER_ZETA.DOC_SNIPPETS: Inject doc snippets for top pending tasks
         try:
@@ -2043,6 +2065,7 @@ class SessionInitTool(BaseMCPTool):
 
         # MARKER_200.TOKEN_BUDGET: Enforce hard token budget BEFORE ELISION compression.
         # Two-layer: JEPA-driven filtering + tier-based progressive drop.
+        _budget_role = None
         try:
             _budget_role = _role.callsign if _role else role_name
             context = _apply_token_budget(context, max_context_tokens, _budget_role)
@@ -2083,6 +2106,11 @@ class SessionInitTool(BaseMCPTool):
                     context = compressed_context
             except Exception:
                 pass  # Compression is best-effort, never blocks session_init
+
+        # MARKER_210.BUDGET_RECHECK: Re-enforce budget after ELISION compression.
+        # Without this, ELISION compression (which runs after budget enforcement)
+        # can leave the response over budget since it only saves 3-5%.
+        context = _apply_token_budget(context, max_context_tokens, _budget_role)
 
         # MARKER_198.P0.1: Persist STM snapshot so the next session can restore it.
         # Called here (end of session_init) to capture any entries added during
