@@ -2924,6 +2924,18 @@ async def main():
     session_id = await init_client(session_id=args.session_id)
     print(f"[MCP] Started with session_id={session_id[:8]}...", file=sys.stderr)
 
+    # MARKER_MEM_PHASE7D: Register memory recall hooks
+    try:
+        from src.mcp.bridge_hooks import register_pre_hook, register_post_hook
+        from src.services.memory_recall_hook import (
+            memory_recall_pre_hook, memory_recall_post_hook,
+        )
+        register_pre_hook(memory_recall_pre_hook)
+        register_post_hook(memory_recall_post_hook)
+        print("[MCP] Memory recall hooks registered", file=sys.stderr)
+    except Exception as e:
+        print(f"[MCP] Memory recall hooks skipped: {e}", file=sys.stderr)
+
     # MARKER_201.MCP_NOTIFY_RECEIVER: Start cross-process notification receiver.
     # Connects to UDS daemon and buffers push events for piggyback delivery.
     global _notification_receiver

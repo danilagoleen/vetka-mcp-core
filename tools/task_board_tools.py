@@ -281,6 +281,8 @@ TASK_BOARD_SCHEMA = {
                 "notifications",
                 "ack_notifications",
                 "agent_activity",
+                "remember",
+                "recall",
             ],
             "description": "Operation to perform",
         },
@@ -529,6 +531,24 @@ TASK_BOARD_SCHEMA = {
             "description": "For action=ack_notifications: specific notification IDs to mark as read",
             "items": {"type": "string"},
             "type": "array",
+        },
+        # MARKER_MEM_PHASE7B: Memory CRUD parameters
+        "content": {
+            "type": "string",
+            "description": "Memory content text (required for action=remember)",
+        },
+        "memory_type": {
+            "type": "string",
+            "description": "Memory type: aura, idea, learning, feedback, pattern",
+        },
+        "trigger_keys": {
+            "description": "Trigger keys for proactive recall (e.g. file paths, error patterns)",
+            "items": {"type": "string"},
+            "type": "array",
+        },
+        "expires_at": {
+            "type": "string",
+            "description": "ISO datetime after which memory is stale (optional)",
         },
     },
     "required": ["action"],
@@ -1849,6 +1869,37 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
     # MARKER_212.AGENT_ACTIVITY: tmux-based agent activity monitor
     elif action == "agent_activity":
         return _agent_activity(board, arguments)
+
+    # MARKER_MEM_PHASE7B: Structured memory CRUD
+    elif action == "remember":
+        content = arguments.get("content", "").strip()
+        memory_type = arguments.get("memory_type", "learning")
+        if not content:
+            return {"success": False, "error": "remember requires content"}
+        if memory_type not in ("aura", "idea", "learning", "feedback", "pattern"):
+            return {"success": False, "error": f"Invalid memory_type: {memory_type}. Use: aura, idea, learning, feedback, pattern"}
+        return board.remember(
+            content=content,
+            memory_type=memory_type,
+            role_id=arguments.get("role", arguments.get("source_role", "")),
+            project_id=arguments.get("project_id", ""),
+            task_id=arguments.get("task_id", ""),
+            tags=[t.strip() for t in arguments.get("tags", "").split(",") if t.strip()] if isinstance(arguments.get("tags"), str) else (arguments.get("tags") or []),
+            trigger_keys=[k.strip() for k in arguments.get("trigger_keys", "").split(",") if k.strip()] if isinstance(arguments.get("trigger_keys"), str) else (arguments.get("trigger_keys") or []),
+            expires_at=arguments.get("expires_at"),
+        )
+
+    elif action == "recall":
+        role_id = arguments.get("role", "")
+        memory_type = arguments.get("memory_type", "")
+        query = arguments.get("query", "")
+        limit = int(arguments.get("limit", 10))
+        return board.recall(
+            role_id=role_id,
+            memory_type=memory_type,
+            query=query,
+            limit=limit,
+        )
 
     # MARKER_206.SYNAPSE: Commander-facing spawn/write/wake/status/kill
     elif action == "spawn":
