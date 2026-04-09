@@ -1726,7 +1726,7 @@ class SessionInitTool(BaseMCPTool):
             except Exception as _rm_err:
                 logger.debug("[SessionInit] Role memory load failed (non-fatal): %s", _rm_err)
 
-        # Ingest role memories into ENGRAM L1 for semantic retrieval
+        # MARKER_203.ENGRAM_BRIDGE: Ingest role memories into ENGRAM L1 for semantic retrieval
         if _resolved_role:
             try:
                 from src.memory.engram_cache import ingest_role_memories
@@ -2156,7 +2156,7 @@ class SessionInitTool(BaseMCPTool):
                 from src.memory.stm_buffer import get_stm_buffer
 
                 stm = get_stm_buffer()
-                stm_count = len(stm.items) if hasattr(stm, "items") else 0
+                stm_count = len(stm) if stm else 0
                 memory_health["stm"] = {
                     "items": stm_count,
                     "status": "ok" if stm_count > 0 else "cold",

@@ -1801,6 +1801,18 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
         skipped = board.get_debrief_skipped_tasks(limit)
         return {"success": True, "skipped": skipped, "count": len(skipped)}
 
+    # ── MARKER_MEM_PHASE3: Debrief query ──────────
+
+    elif action == "debrief_query":
+        results = board.query_debriefs(
+            agent_id=arguments.get("agent_id", arguments.get("role", "")),
+            task_id=arguments.get("task_id", ""),
+            domain=arguments.get("domain", ""),
+            query=arguments.get("query", ""),
+            limit=int(arguments.get("limit", 10)),
+        )
+        return {"success": True, "debriefs": results, "count": len(results)}
+
     # ── MARKER_200.AGENT_WAKE: Notification inbox ──────────
 
     elif action == "notify":
@@ -2044,6 +2056,43 @@ def _inject_debrief(result: dict, arguments: dict) -> None:
             "What would you do with 2 more hours?"
         ),
     }
+
+    # MARKER_MEM_PHASE3: Save debrief to SQLite (hybrid MD/SQLite)
+    # Q1-Q3 answers from agent go into debriefs table alongside existing MD write.
+    _q1 = arguments.get("q1_bugs", "")
+    _q2 = arguments.get("q2_worked", "")
+    _q3 = arguments.get("q3_idea", "")
+    if _q1 or _q2 or _q3:
+        try:
+            from src.orchestration.task_board import get_task_board
+            _tb = get_task_board()
+            _task_id = arguments.get("task_id") or result.get("task_id", "")
+            _agent_id = arguments.get("role", "unknown")
+            _domain = arguments.get("domain", "")
+            _session_id = arguments.get("session_id", "")
+            # Auto-detect subsystems from Q content
+            _subsystems = []
+            if _q1:
+                _subsystems.extend(["ENGRAM", "CORTEX"])
+            if _q2:
+                _subsystems.append("CORTEX")
+            if _q3:
+                _subsystems.append("AURA")
+            _tb.save_debrief(
+                task_id=_task_id,
+                agent_id=_agent_id,
+                session_id=_session_id,
+                domain=_domain,
+                q1_bugs=_q1,
+                q2_worked=_q2,
+                q3_idea=_q3,
+                q4_handoff=arguments.get("q4_handoff", ""),
+                q5_hot_files=arguments.get("q5_hot_files", ""),
+                q6_project=arguments.get("q6_project", ""),
+                subsystems=str(_subsystems),
+            )
+        except Exception:
+            pass  # Debrief save is best-effort
 
     # MARKER_200.DECISIONS: Route explicit decisions to ENGRAM L1 (permanent, category=architecture)
     # Replaces HERMES LLM-based "Key Decisions" extraction — zero LLM cost.
