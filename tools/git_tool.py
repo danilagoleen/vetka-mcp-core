@@ -202,6 +202,25 @@ class GitCommitTool(BaseMCPTool):
         # Secondary defense (primary = pre-commit hook). Checks VETKA_AGENT_ROLE env var.
         # Bypass: set VETKA_COMMIT_GUARDRAIL_BYPASS=1 for emergency (e.g. Commander hotfix).
         _guard_role = os.environ.get("VETKA_AGENT_ROLE", "").strip()
+        # MARKER_210.BYPASS_AUDIT: Log VETKA_COMMIT_GUARDRAIL_BYPASS usage for compliance metrics
+        if _guard_role and os.environ.get("VETKA_COMMIT_GUARDRAIL_BYPASS"):
+            try:
+                import datetime as _dt
+                _audit_dir = Path(__file__).parents[4] / "data" / "vetka_audit"
+                _audit_dir.mkdir(parents=True, exist_ok=True)
+                _audit_log = _audit_dir / "no_verify.log"
+                _branch = subprocess.run(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    capture_output=True, text=True
+                ).stdout.strip()
+                with open(_audit_log, "a") as _f:
+                    _f.write(
+                        f"{_dt.datetime.utcnow().isoformat()} | "
+                        f"ROLE={_guard_role} | BRANCH={_branch} | "
+                        f"MSG={message[:80]} | NO_VERIFY=1\n"
+                    )
+            except Exception:
+                pass  # Audit log never blocks commit
         if _guard_role and not os.environ.get("VETKA_COMMIT_GUARDRAIL_BYPASS"):
             try:
                 from src.orchestration.task_board import check_claimed_task_for_hook, get_task_board
