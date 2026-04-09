@@ -1739,6 +1739,24 @@ class SessionInitTool(BaseMCPTool):
             except Exception as _rm_err:
                 logger.debug("[SessionInit] Role memory load failed (non-fatal): %s", _rm_err)
 
+        # MARKER_MEM_PHASE4: Inject Q4 (handoff) + Q5 (hot files) from recent debriefs
+        if _resolved_role:
+            try:
+                from src.orchestration.task_board import get_task_board as _get_tb_ph4
+                _dbs = _get_tb_ph4().query_debriefs(agent_id=_resolved_role, limit=3)
+                _q4_texts = [d["q4_handoff"] for d in _dbs if d.get("q4_handoff")]
+                if _q4_texts:
+                    context["predecessor_advice"] = _q4_texts[0][:500]
+                _q5_raw = " ".join(d.get("q5_hot_files", "") for d in _dbs if d.get("q5_hot_files"))
+                if _q5_raw:
+                    import re as _re
+                    _q5_files = list(dict.fromkeys(
+                        p.strip() for p in _re.split(r"[,\n]+", _q5_raw) if p.strip()
+                    ))[:10]
+                    context.setdefault("my_focus", {})["hot_files_q5"] = _q5_files
+            except Exception as _ph4_err:
+                logger.debug("[SessionInit] Phase4 debrief inject failed (non-fatal): %s", _ph4_err)
+
         # Ingest role memories into ENGRAM L1 for semantic retrieval
         if _resolved_role:
             try:
