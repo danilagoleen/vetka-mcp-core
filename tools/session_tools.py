@@ -1769,6 +1769,17 @@ class SessionInitTool(BaseMCPTool):
             except Exception as _rmi_err:
                 logger.debug("[SessionInit] Role memory ENGRAM ingestion failed (non-fatal): %s", _rmi_err)
 
+        # MARKER_MEM_PHASE5: Hydrate CAM with ENGRAM context
+        # Makes CAM surprise-aware of agent's existing knowledge
+        try:
+            from src.memory.engram_cache import hydrate_cam_from_engram
+            _engram_ctx_for_cam = hydrate_cam_from_engram(_resolved_role)
+            if _engram_ctx_for_cam:
+                context.setdefault("_cam_engram_context", _engram_ctx_for_cam)
+                logger.debug("[SessionInit] CAM hydrated with %d chars of ENGRAM context", len(_engram_ctx_for_cam))
+        except Exception as _hyd_err:
+            logger.debug("[SessionInit] CAM hydration failed (non-fatal): %s", _hyd_err)
+
         # MARKER_178.1.4: Build actionable next_steps from context
         try:
             next_steps = []
