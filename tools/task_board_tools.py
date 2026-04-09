@@ -519,7 +519,7 @@ TASK_BOARD_SCHEMA = {
         },
         "ntype": {
             "type": "string",
-            "description": "Notification type: task_verified, task_needs_fix, ready_to_merge, task_completed, custom",
+            "description": "Notification type: task_verified, task_needs_fix, merge_conflict, ready_to_merge, task_completed, custom",
         },
         "unread_only": {
             "type": "boolean",
@@ -1801,18 +1801,6 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
         skipped = board.get_debrief_skipped_tasks(limit)
         return {"success": True, "skipped": skipped, "count": len(skipped)}
 
-    # ── MARKER_MEM_PHASE3: Debrief query ──────────
-
-    elif action == "debrief_query":
-        results = board.query_debriefs(
-            agent_id=arguments.get("agent_id", arguments.get("role", "")),
-            task_id=arguments.get("task_id", ""),
-            domain=arguments.get("domain", ""),
-            query=arguments.get("query", ""),
-            limit=int(arguments.get("limit", 10)),
-        )
-        return {"success": True, "debriefs": results, "count": len(results)}
-
     # ── MARKER_200.AGENT_WAKE: Notification inbox ──────────
 
     elif action == "notify":
@@ -2033,14 +2021,25 @@ def _handle_synapse(arguments: Dict[str, Any]) -> Dict[str, Any]:
                 "error": f"Unknown sub-operation '{sub}'. Valid: spawn, write, wake, status, kill"}
 
 
-def _inject_debrief(result: dict, arguments: dict) -> None:
-    """MARKER_195.22: Always inject debrief questions on successful complete.
+# MARKER_195.23: Per-role debrief counter — request every 3rd task only.
+# Module-level dict survives within one MCP process lifetime (per-session).
+# Keys: role callsign (str). Values: completion count (int).
+_DEBRIEF_COUNTERS: dict = {}
+_DEBRIEF_EVERY_N: int = 3
 
-    Previous version (195.21) depended on session_tracker state which breaks
-    on worktrees (MCP subprocess starts before code update, singleton resets
-    on reload, etc.). Simplified: always inject. Agent decides whether to answer.
+
+def _inject_debrief(result: dict, arguments: dict) -> None:
+    """MARKER_195.23: Inject debrief questions every 3rd completed task per role.
+
+    Frequency: every Nth task (default N=3). Q1-Q3 only — Q4-Q6 dormant until Phase 7.
+    Counter is module-level (survives reload inside one process). Resets on process restart.
     """
     if not result.get("success"):
+        return
+    role = arguments.get("role") or arguments.get("assigned_to") or "unknown"
+    _DEBRIEF_COUNTERS[role] = _DEBRIEF_COUNTERS.get(role, 0) + 1
+    if _DEBRIEF_COUNTERS[role] % _DEBRIEF_EVERY_N != 0:
+        result["debrief_requested"] = False
         return
     result["debrief_requested"] = True
     result["debrief_questions"] = {
@@ -2056,43 +2055,6 @@ def _inject_debrief(result: dict, arguments: dict) -> None:
             "What would you do with 2 more hours?"
         ),
     }
-
-    # MARKER_MEM_PHASE3: Save debrief to SQLite (hybrid MD/SQLite)
-    # Q1-Q3 answers from agent go into debriefs table alongside existing MD write.
-    _q1 = arguments.get("q1_bugs", "")
-    _q2 = arguments.get("q2_worked", "")
-    _q3 = arguments.get("q3_idea", "")
-    if _q1 or _q2 or _q3:
-        try:
-            from src.orchestration.task_board import get_task_board
-            _tb = get_task_board()
-            _task_id = arguments.get("task_id") or result.get("task_id", "")
-            _agent_id = arguments.get("role", "unknown")
-            _domain = arguments.get("domain", "")
-            _session_id = arguments.get("session_id", "")
-            # Auto-detect subsystems from Q content
-            _subsystems = []
-            if _q1:
-                _subsystems.extend(["ENGRAM", "CORTEX"])
-            if _q2:
-                _subsystems.append("CORTEX")
-            if _q3:
-                _subsystems.append("AURA")
-            _tb.save_debrief(
-                task_id=_task_id,
-                agent_id=_agent_id,
-                session_id=_session_id,
-                domain=_domain,
-                q1_bugs=_q1,
-                q2_worked=_q2,
-                q3_idea=_q3,
-                q4_handoff=arguments.get("q4_handoff", ""),
-                q5_hot_files=arguments.get("q5_hot_files", ""),
-                q6_project=arguments.get("q6_project", ""),
-                subsystems=str(_subsystems),
-            )
-        except Exception:
-            pass  # Debrief save is best-effort
 
     # MARKER_200.DECISIONS: Route explicit decisions to ENGRAM L1 (permanent, category=architecture)
     # Replaces HERMES LLM-based "Key Decisions" extraction — zero LLM cost.
@@ -2485,6 +2447,9 @@ def _create_passive_experience_report(
                     pass
         except Exception:
             pass  # Direct routing never blocks completion
+
+    # MARKER_MEM_PHASE4: Q4-Q6 routing dormant until Phase 7 (trigger-based memory).
+    # Columns remain in debriefs SQLite table — not populated here anymore.
 
     return True
 
