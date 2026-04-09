@@ -600,6 +600,7 @@ class SessionInitTool(BaseMCPTool):
         if not _explicit_budget:
             # MARKER_200.MODEL_TIER: Check agent registry first (set by Commander)
             _registry_tier = ""
+            _tier_role = None
             if role_name:
                 try:
                     from src.services.agent_registry import get_agent_registry
@@ -617,12 +618,26 @@ class SessionInitTool(BaseMCPTool):
                 or os.environ.get("ANTHROPIC_MODEL") # some integrations
                 or ""
             ).lower()
-            # Map model identifiers to budget tiers
-            if any(k in _model_tier for k in ("haiku", "scout", "small", "fast")):
-                max_context_tokens = 2000
-            elif any(k in _model_tier for k in ("opus", "titan", "1m")):
-                max_context_tokens = 8000
-            # else: keep default 4000 (Sonnet/worker tier)
+            # MARKER_MEM.PHASE2.ADAPTIVE_BUDGET: replace hardcoded 2000/4000/8000 with
+            # model-aware calculation from llm_model_registry. Fallback chain:
+            #   (1) context_budget field in agent_registry.yaml (per-role explicit override)
+            #   (2) llm_model_registry._SAFE_DEFAULTS[model_tier].context_length * BUDGET_RATIO
+            #   (3) 200k default (all current Claude/major models) * 2% = 4000 tokens
+            _budget_ratio = float(os.environ.get("VETKA_SESSION_BUDGET_RATIO", "0.02"))
+            _context_budget_override = getattr(_tier_role, "context_budget", None)
+            if _context_budget_override:
+                max_context_tokens = int(_context_budget_override)
+            else:
+                _context_window = 200_000  # all current Claude / major models
+                try:
+                    from src.elisya.llm_model_registry import _SAFE_DEFAULTS as _LLM_DEFS
+                    for _mid, _minfo in _LLM_DEFS.items():
+                        if _model_tier and _model_tier in _mid:
+                            _context_window = _minfo.get("context_length", 200_000)
+                            break
+                except Exception:
+                    pass
+                max_context_tokens = max(1000, int(_context_window * _budget_ratio))
 
         # MARKER_108_1: Unified MCP-Chat ID
         # If chat_id provided, use it as session_id
@@ -1725,6 +1740,24 @@ class SessionInitTool(BaseMCPTool):
                     logger.debug("[SessionInit] Loaded %d role memory entries for %s", len(_role_entries), _resolved_role)
             except Exception as _rm_err:
                 logger.debug("[SessionInit] Role memory load failed (non-fatal): %s", _rm_err)
+
+        # MARKER_MEM_PHASE4: Inject Q4 (handoff) + Q5 (hot files) from recent debriefs
+        if _resolved_role:
+            try:
+                from src.orchestration.task_board import get_task_board as _get_tb_ph4
+                _dbs = _get_tb_ph4().query_debriefs(agent_id=_resolved_role, limit=3)
+                _q4_texts = [d["q4_handoff"] for d in _dbs if d.get("q4_handoff")]
+                if _q4_texts:
+                    context["predecessor_advice"] = _q4_texts[0][:500]
+                _q5_raw = " ".join(d.get("q5_hot_files", "") for d in _dbs if d.get("q5_hot_files"))
+                if _q5_raw:
+                    import re as _re
+                    _q5_files = list(dict.fromkeys(
+                        p.strip() for p in _re.split(r"[,\n]+", _q5_raw) if p.strip()
+                    ))[:10]
+                    context.setdefault("my_focus", {})["hot_files_q5"] = _q5_files
+            except Exception as _ph4_err:
+                logger.debug("[SessionInit] Phase4 debrief inject failed (non-fatal): %s", _ph4_err)
 
         # MARKER_203.ENGRAM_BRIDGE: Ingest role memories into ENGRAM L1 for semantic retrieval
         if _resolved_role:
