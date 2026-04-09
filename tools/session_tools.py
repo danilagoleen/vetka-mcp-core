@@ -1473,8 +1473,6 @@ class SessionInitTool(BaseMCPTool):
                 "session_init": True,
                 "task_board_checked": _pt_session.task_board_checked,
                 "task_claimed": _pt_session.task_claimed,
-                # MARKER_210.SOFT_GUARD: no_task_claimed flag for session_init awareness
-                "no_task_claimed": not _pt_session.task_claimed,
                 "claimed_task_id": _pt_session.claimed_task_id,
                 "files_read": len(_pt_session.files_read),
                 "files_edited": len(_pt_session.files_edited),
@@ -1759,7 +1757,7 @@ class SessionInitTool(BaseMCPTool):
             except Exception as _ph4_err:
                 logger.debug("[SessionInit] Phase4 debrief inject failed (non-fatal): %s", _ph4_err)
 
-        # MARKER_203.ENGRAM_BRIDGE: Ingest role memories into ENGRAM L1 for semantic retrieval
+        # Ingest role memories into ENGRAM L1 for semantic retrieval
         if _resolved_role:
             try:
                 from src.memory.engram_cache import ingest_role_memories
@@ -1768,17 +1766,6 @@ class SessionInitTool(BaseMCPTool):
                     logger.debug("[SessionInit] Ingested %d role memory entries into ENGRAM for %s", _rm_ingested, _resolved_role)
             except Exception as _rmi_err:
                 logger.debug("[SessionInit] Role memory ENGRAM ingestion failed (non-fatal): %s", _rmi_err)
-
-        # MARKER_MEM_PHASE5: Hydrate CAM with ENGRAM context
-        # Makes CAM surprise-aware of agent's existing knowledge
-        try:
-            from src.memory.engram_cache import hydrate_cam_from_engram
-            _engram_ctx_for_cam = hydrate_cam_from_engram(_resolved_role)
-            if _engram_ctx_for_cam:
-                context.setdefault("_cam_engram_context", _engram_ctx_for_cam)
-                logger.debug("[SessionInit] CAM hydrated with %d chars of ENGRAM context", len(_engram_ctx_for_cam))
-        except Exception as _hyd_err:
-            logger.debug("[SessionInit] CAM hydration failed (non-fatal): %s", _hyd_err)
 
         # MARKER_178.1.4: Build actionable next_steps from context
         try:
@@ -1840,14 +1827,6 @@ class SessionInitTool(BaseMCPTool):
             if context.get("role_generator_hint"):
                 next_steps.insert(0,
                     "⚠️ No registered role — run: scripts/release/add_role.sh --callsign NAME --domain DOMAIN --worktree WORKTREE"
-                )
-
-            # MARKER_210.SOFT_GUARD: Warn if no task claimed (non-blocking awareness)
-            _ps = context.get("protocol_status", {})
-            if _ps.get("no_task_claimed") and role_name:
-                next_steps.insert(0,
-                    "⚠️ SOFT GUARD: No claimed task. Claim before working: "
-                    "vetka_task_board action=claim task_id=<id>"
                 )
 
             if next_steps:
@@ -2200,7 +2179,7 @@ class SessionInitTool(BaseMCPTool):
                 from src.memory.stm_buffer import get_stm_buffer
 
                 stm = get_stm_buffer()
-                stm_count = len(stm) if stm else 0
+                stm_count = len(stm.items) if hasattr(stm, "items") else 0
                 memory_health["stm"] = {
                     "items": stm_count,
                     "status": "ok" if stm_count > 0 else "cold",
@@ -2236,6 +2215,19 @@ class SessionInitTool(BaseMCPTool):
                 }
             except Exception:
                 memory_health["bridge_hooks"] = {"status": "error"}
+
+            # MARKER_MEM_PHASE6F: MemorySubscriber session metrics
+            try:
+                from src.orchestration.event_bus import get_memory_subscriber
+                mem_metrics = get_memory_subscriber().get_metrics()
+                memory_health["memory_subscriber"] = {
+                    "tasks_completed": mem_metrics["tasks_completed"],
+                    "debriefs_with_memory": mem_metrics["debriefs_with_memory"],
+                    "familiarity_hits": mem_metrics["familiarity_hits"],
+                    "status": "ok",
+                }
+            except Exception:
+                memory_health["memory_subscriber"] = {"status": "error"}
 
             context["memory_health"] = memory_health
         except Exception:
