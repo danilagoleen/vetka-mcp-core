@@ -65,7 +65,7 @@ _SECTION_TIERS: Dict[str, int] = {
     "persisted": 1, "user_preferences": 1,
     # T2: Important context
     "task_board_summary": 2, "engram_learnings": 2, "next_steps": 2,
-    "my_focus": 2, "project_digest": 2,
+    "my_focus": 2, "project_digest": 2, "role_memory": 2,
     # T3: Enrichment
     "reflex_recommendations": 3, "reflex_warnings": 3, "blocked_tools": 3,
     "semantic_lessons": 3, "jepa_session_lens": 3, "capabilities": 3,
@@ -1679,6 +1679,27 @@ class SessionInitTool(BaseMCPTool):
                 "[SessionInit] FEEDBACK_BRIDGE failed (non-fatal): %s", _fb_err
             )
 
+        # MARKER_203.ROLE_MEMORY: Load recent role memory entries
+        if _resolved_role:
+            try:
+                from src.memory.role_memory_writer import load_recent
+                _role_entries = load_recent(_resolved_role, last_n=3)
+                if _role_entries:
+                    context["role_memory"] = _role_entries
+                    logger.debug("[SessionInit] Loaded %d role memory entries for %s", len(_role_entries), _resolved_role)
+            except Exception as _rm_err:
+                logger.debug("[SessionInit] Role memory load failed (non-fatal): %s", _rm_err)
+
+        # MARKER_203.ENGRAM_BRIDGE: Ingest role memories into ENGRAM L1 for semantic retrieval
+        if _resolved_role:
+            try:
+                from src.memory.engram_cache import ingest_role_memories
+                _rm_ingested = ingest_role_memories(_resolved_role)
+                if _rm_ingested:
+                    logger.debug("[SessionInit] Ingested %d role memory entries into ENGRAM for %s", _rm_ingested, _resolved_role)
+            except Exception as _rmi_err:
+                logger.debug("[SessionInit] Role memory ENGRAM ingestion failed (non-fatal): %s", _rmi_err)
+
         # MARKER_178.1.4: Build actionable next_steps from context
         try:
             next_steps = []
@@ -2085,7 +2106,7 @@ class SessionInitTool(BaseMCPTool):
                 from src.memory.stm_buffer import get_stm_buffer
 
                 stm = get_stm_buffer()
-                stm_count = len(stm.items) if hasattr(stm, "items") else 0
+                stm_count = len(stm) if stm else 0
                 memory_health["stm"] = {
                     "items": stm_count,
                     "status": "ok" if stm_count > 0 else "cold",
