@@ -181,14 +181,21 @@ def _apply_token_budget(
     if current_tokens <= max_tokens:
         return context
 
+    # MARKER_210.BUDGET_FIX: Unclassified keys default to T4 (droppable).
+    # Previous bug: keys not in _SECTION_TIERS bypassed enforcement entirely,
+    # causing Delta (haiku, 4000 token budget) to hit 99.7% every init.
+    _T1_IMMUNE = {"session_id", "chat_id", "linked", "linked_to_existing",
+                   "user_id", "group_id", "initialized", "initialized_at"}
+
     # Drop tiers from T4 down until within budget
     for tier_to_drop in (4, 3):
         if current_tokens <= max_tokens:
             break
-        keys_to_drop = [
-            k for k, t in _SECTION_TIERS.items()
-            if t == tier_to_drop and k in context
-        ]
+        keys_to_drop = []
+        for k in list(context.keys()):
+            tier = _SECTION_TIERS.get(k, 4)  # unclassified = T4
+            if tier == tier_to_drop and k not in _T1_IMMUNE:
+                keys_to_drop.append(k)
         for key in keys_to_drop:
             context.pop(key, None)
         current_tokens = _estimate_tokens(context)
