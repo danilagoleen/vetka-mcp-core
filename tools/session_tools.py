@@ -1458,6 +1458,8 @@ class SessionInitTool(BaseMCPTool):
                 "session_init": True,
                 "task_board_checked": _pt_session.task_board_checked,
                 "task_claimed": _pt_session.task_claimed,
+                # MARKER_210.SOFT_GUARD: no_task_claimed flag for session_init awareness
+                "no_task_claimed": not _pt_session.task_claimed,
                 "claimed_task_id": _pt_session.claimed_task_id,
                 "files_read": len(_pt_session.files_read),
                 "files_edited": len(_pt_session.files_edited),
@@ -1794,6 +1796,14 @@ class SessionInitTool(BaseMCPTool):
             if context.get("role_generator_hint"):
                 next_steps.insert(0,
                     "⚠️ No registered role — run: scripts/release/add_role.sh --callsign NAME --domain DOMAIN --worktree WORKTREE"
+                )
+
+            # MARKER_210.SOFT_GUARD: Warn if no task claimed (non-blocking awareness)
+            _ps = context.get("protocol_status", {})
+            if _ps.get("no_task_claimed") and role_name:
+                next_steps.insert(0,
+                    "⚠️ SOFT GUARD: No claimed task. Claim before working: "
+                    "vetka_task_board action=claim task_id=<id>"
                 )
 
             if next_steps:
