@@ -1929,29 +1929,32 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
         )
 
     elif action == "pin":
+        # MARKER_213.PIN_FALLBACK_FIX: _ok/_err were undefined → NameError on every pin.
         _role = arguments.get("role", arguments.get("source_role", ""))
         _task_id = arguments.get("task_id", "")
         if not _role or not _task_id:
-            return _err("action=pin requires role and task_id")
-        result = board.pin(
+            return {"success": False, "error": "action=pin requires role and task_id"}
+        _files = arguments.get("files_modified", "")
+        if isinstance(_files, str):
+            _files = [f.strip() for f in _files.split(",") if f.strip()]
+        return board.pin(
             role_id=_role,
             task_id=_task_id,
             context_summary=arguments.get("context_summary", ""),
-            files_modified=[f.strip() for f in arguments.get("files_modified", "").split(",") if f.strip()] if isinstance(arguments.get("files_modified", ""), str) else arguments.get("files_modified", []),
+            files_modified=_files or [],
             next_steps=arguments.get("next_steps", ""),
         )
-        return _ok(result)
 
     elif action == "unpin":
+        # MARKER_213.PIN_FALLBACK_FIX: _ok/_err were undefined → NameError on every unpin.
         _role = arguments.get("role", arguments.get("source_role", ""))
         _task_id = arguments.get("task_id", "")
         if not _role:
-            return _err("action=unpin requires role")
-        result = board.unpin(
+            return {"success": False, "error": "action=unpin requires role"}
+        return board.unpin(
             role_id=_role,
             task_id=_task_id,
         )
-        return _ok(result)
 
     # MARKER_206.SYNAPSE: Commander-facing spawn/write/wake/status/kill
     elif action == "spawn":
