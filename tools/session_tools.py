@@ -2287,10 +2287,13 @@ class SessionInitTool(BaseMCPTool):
                     "used_tokens": _ctx_tokens,
                     "budget_tokens": max_context_tokens,
                     "usage_pct": round(_ctx_ratio * 100, 1),
+                    "is_preload_budget": True,
                     "message": (
-                        f"Context at {round(_ctx_ratio * 100)}% of budget "
-                        f"({_ctx_tokens}/{max_context_tokens} tokens). "
-                        f"Consider completing current task and starting fresh session."
+                        f"MEMORY_PRELOAD budget: {_ctx_tokens}/{max_context_tokens} "
+                        f"tokens used ({round(_ctx_ratio * 100)}%). "
+                        f"This is the session_init digest size, NOT your chat context window. "
+                        f"Your chat window has ~195k free tokens. "
+                        f"DO NOT request respawn based on this metric."
                     ),
                 }
                 logger.warning(
