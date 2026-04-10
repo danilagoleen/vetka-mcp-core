@@ -97,7 +97,9 @@ def parse_args():
         return DefaultArgs()
 
 # Session context for async propagation
-session_context: contextvars.ContextVar[str] = contextvars.ContextVar('session_id', default='default')
+# MARKER_PHASE8O.CONTEXT_VARS: moved to src/mcp/context_vars.py so task_board
+# can import it without a circular dependency on this bridge module.
+from src.mcp.context_vars import session_context  # noqa: E402
 
 # Phase 55.1: MCP tools registration
 from src.mcp.tools.session_tools import register_session_tools
