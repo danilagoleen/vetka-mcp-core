@@ -708,13 +708,29 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
     # MARKER_195.21: Use consistent session_id (was hardcoded "mcp_default", debrief read "default")
     # MARKER_198.ROLE: Aligned fallback to "default" — session_init stores role on "default",
     # so task_board must look it up on the same key.
-    _tracker_sid = arguments.get("session_id") or _PROCESS_SESSION_ID
+    # MARKER_PHASE8.EXHAUSTION_GUARD_V4: Prefer contextvar as the source of truth
+    # (it is set by vetka_mcp_bridge.init_client on startup with a per-session UUID).
+    # _PROCESS_SESSION_ID is only a last-resort safety net when contextvar is unset
+    # or still at its "default" sentinel. This ensures the bucket incremented by
+    # record_action() matches the bucket read by the exhaustion guard in
+    # task_board.complete_task() via session_context.get().
+    try:
+        from src.mcp.context_vars import session_context
+        _ctx_sid = session_context.get()
+    except Exception:
+        session_context = None  # type: ignore[assignment]
+        _ctx_sid = None
+    _tracker_sid = (
+        arguments.get("session_id")
+        or (_ctx_sid if _ctx_sid and _ctx_sid != "default" else None)
+        or _PROCESS_SESSION_ID
+    )
     # MARKER_PHASE8O.CONTEXT_VARS: Propagate session_id to contextvar so the
     # exhaustion guard in task_board.complete_task() reads the same key that
     # record_action() increments below.
     try:
-        from src.mcp.context_vars import session_context
-        session_context.set(_tracker_sid)
+        if session_context is not None:
+            session_context.set(_tracker_sid)
     except Exception:
         pass
     try:
