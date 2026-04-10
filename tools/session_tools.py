@@ -2272,6 +2272,19 @@ class SessionInitTool(BaseMCPTool):
             except Exception:
                 memory_health["bridge_hooks"] = {"status": "error"}
 
+            # MARKER_MEM_PHASE6F: MemorySubscriber session metrics
+            try:
+                from src.orchestration.event_bus import get_memory_subscriber
+                mem_metrics = get_memory_subscriber().get_metrics()
+                memory_health["memory_subscriber"] = {
+                    "tasks_completed": mem_metrics["tasks_completed"],
+                    "debriefs_with_memory": mem_metrics["debriefs_with_memory"],
+                    "familiarity_hits": mem_metrics["familiarity_hits"],
+                    "status": "ok",
+                }
+            except Exception:
+                memory_health["memory_subscriber"] = {"status": "error"}
+
             context["memory_health"] = memory_health
         except Exception:
             pass  # Memory health never blocks session_init
