@@ -704,6 +704,14 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
     # MARKER_198.ROLE: Aligned fallback to "default" — session_init stores role on "default",
     # so task_board must look it up on the same key.
     _tracker_sid = arguments.get("session_id") or "default"
+    # MARKER_PHASE8O.CONTEXT_VARS: Propagate session_id to contextvar so the
+    # exhaustion guard in task_board.complete_task() reads the same key that
+    # record_action() increments below.
+    try:
+        from src.mcp.context_vars import session_context
+        session_context.set(_tracker_sid)
+    except Exception:
+        pass
     try:
         from src.services.session_tracker import get_session_tracker
 
