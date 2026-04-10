@@ -16,6 +16,11 @@ import os
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+# MARKER_PHASE8.EXHAUSTION_GUARD_V3: process-stable session fallback.
+# Without this, all agents share the "default" bucket and the guard never fires.
+import uuid as _uuid
+_PROCESS_SESSION_ID = f"proc-{_uuid.uuid4().hex[:12]}"
+
 logger = logging.getLogger("VETKA_MCP")
 
 
@@ -703,7 +708,7 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
     # MARKER_195.21: Use consistent session_id (was hardcoded "mcp_default", debrief read "default")
     # MARKER_198.ROLE: Aligned fallback to "default" — session_init stores role on "default",
     # so task_board must look it up on the same key.
-    _tracker_sid = arguments.get("session_id") or "default"
+    _tracker_sid = arguments.get("session_id") or _PROCESS_SESSION_ID
     # MARKER_PHASE8O.CONTEXT_VARS: Propagate session_id to contextvar so the
     # exhaustion guard in task_board.complete_task() reads the same key that
     # record_action() increments below.
