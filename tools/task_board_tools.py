@@ -19,6 +19,7 @@ from typing import Dict, Any, Optional
 # MARKER_PHASE8.EXHAUSTION_GUARD_V3: process-stable session fallback.
 # Without this, all agents share the "default" bucket and the guard never fires.
 import uuid as _uuid
+
 _PROCESS_SESSION_ID = f"proc-{_uuid.uuid4().hex[:12]}"
 
 logger = logging.getLogger("VETKA_MCP")
@@ -232,9 +233,7 @@ def _elision_compress_list(result: Dict[str, Any]) -> Dict[str, Any]:
             compressed_tasks = []
             for t in v:
                 ct = _elision_rename_task(t)
-                used_abbrevs.update(
-                    ak for ak in ct if ak in _LIST_ELISION_LEGEND
-                )
+                used_abbrevs.update(ak for ak in ct if ak in _LIST_ELISION_LEGEND)
                 compressed_tasks.append(ct)
             out[new_key] = compressed_tasks
         elif isinstance(v, dict) and k == "project_resolve":
@@ -668,6 +667,7 @@ def _suggest_docs_for_title(title: str, limit: int = 5) -> list:
     # Removed stat().st_mtime sort (2000+ syscalls → MCP timeout -32001).
     # Keyword match on filename is sufficient; semantic search (Strategy 1) handles recency.
     import itertools
+
     suggestions = []
     for md_file in itertools.islice(docs_dir.rglob("*.md"), 400):
         name_lower = md_file.name.lower() + " " + md_file.parent.name.lower()
@@ -716,6 +716,7 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
     # task_board.complete_task() via session_context.get().
     try:
         from src.mcp.context_vars import session_context
+
         _ctx_sid = session_context.get()
     except Exception:
         session_context = None  # type: ignore[assignment]
@@ -911,12 +912,17 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
         # Threshold > -15 catches near-identical titles without false-positive noise.
         try:
             import re as _re_dedup
+
             _clean_title = _re_dedup.sub(r"[^\w\s]", " ", title)
             _title_words = _clean_title.split()[:6]
             if _title_words:
                 _fts_hits = board.search_fts(" ".join(_title_words), limit=10)
                 _dupes = [
-                    {"task_id": h["task_id"], "snippet": h["snippet"][:120], "score": h["rank"]}
+                    {
+                        "task_id": h["task_id"],
+                        "snippet": h["snippet"][:120],
+                        "score": h["rank"],
+                    }
                     for h in _fts_hits
                     if h["task_id"] != task_id and h["rank"] > -15
                 ]
@@ -943,6 +949,7 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
                 _shared_zone_files: set = set()
                 try:
                     from src.services.agent_registry import get_agent_registry
+
                     _reg = get_agent_registry()
                     _shared_zone_files = {zone.file for zone in _reg.shared_zones}
                 except Exception:
@@ -950,14 +957,21 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
 
                 # Only warn about exclusive paths (not registered shared_zones)
                 exclusive_paths = [
-                    p for p in new_paths
+                    p
+                    for p in new_paths
                     if not any(
-                        p == sz or p.endswith("/" + sz) or sz.endswith("/" + p.split("/")[-1])
+                        p == sz
+                        or p.endswith("/" + sz)
+                        or sz.endswith("/" + p.split("/")[-1])
                         for sz in _shared_zone_files
                     )
                 ]
 
-                overlapping = board.find_tasks_by_changed_files(exclusive_paths) if exclusive_paths else []
+                overlapping = (
+                    board.find_tasks_by_changed_files(exclusive_paths)
+                    if exclusive_paths
+                    else []
+                )
                 # Exclude the task we just created
                 overlapping = [t for t in overlapping if t.get("id") != task_id]
                 if overlapping:
@@ -1149,6 +1163,7 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
         result = {"success": True, "task": task}
         # MARKER_191.20: Inject subtask_progress for visibility
         from src.orchestration.task_board import TaskBoard as _TB
+
         _progress = _TB.get_subtask_progress(task)
         if _progress is not None:
             result["subtask_progress"] = _progress
@@ -1255,7 +1270,8 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
                 # Agent sees predecessor approaches at the right moment — claim time.
                 try:
                     import re as _re_claim
-                    _clean = _re_claim.sub(r'[^\w\s]', '', task.get("title", ""))
+
+                    _clean = _re_claim.sub(r"[^\w\s]", "", task.get("title", ""))
                     _words = _clean.split()[:5]
                     if _words:
                         _fts_hits = board.search_fts(" ".join(_words), limit=8)
@@ -1264,13 +1280,22 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
                             if _h.get("task_id") == task_id:
                                 continue
                             _st = board.get_task(_h["task_id"])
-                            if _st and _st.get("status") in ("done", "done_main", "done_worktree", "verified"):
-                                _similar.append({
-                                    "task_id": _h["task_id"],
-                                    "title": _st.get("title", "")[:80],
-                                    "commit_message": (_st.get("commit_message") or "")[:120],
-                                    "assigned_to": _st.get("assigned_to", ""),
-                                })
+                            if _st and _st.get("status") in (
+                                "done",
+                                "done_main",
+                                "done_worktree",
+                                "verified",
+                            ):
+                                _similar.append(
+                                    {
+                                        "task_id": _h["task_id"],
+                                        "title": _st.get("title", "")[:80],
+                                        "commit_message": (
+                                            _st.get("commit_message") or ""
+                                        )[:120],
+                                        "assigned_to": _st.get("assigned_to", ""),
+                                    }
+                                )
                                 if len(_similar) >= 3:
                                     break
                         if _similar:
@@ -1281,12 +1306,20 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
                 # Qdrant L2 learnings related to this task
                 try:
                     from src.orchestration.resource_learnings import get_learning_store
+
                     _l2 = get_learning_store()
-                    _query = task.get("title", "") + " " + (task.get("description", "")[:200])
+                    _query = (
+                        task.get("title", "")
+                        + " "
+                        + (task.get("description", "")[:200])
+                    )
                     _learnings = _l2.search_learnings_sync(query=_query, limit=3)
                     if _learnings:
                         result["related_learnings"] = [
-                            {"text": lr.get("text", "")[:150], "category": lr.get("category", "")}
+                            {
+                                "text": lr.get("text", "")[:150],
+                                "category": lr.get("category", ""),
+                            }
                             for lr in _learnings
                         ]
                 except Exception:
@@ -1295,10 +1328,13 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
             # MARKER_200.STM_AUTOSAVE: Persist STM on claim (session milestone)
             try:
                 from src.memory.stm_buffer import get_stm_buffer
+
                 _stm = get_stm_buffer()
                 if len(_stm) > 0:
                     _stm.save_to_disk()
-                    logger.debug(f"[TaskBoard] STM auto-saved on claim: {len(_stm)} entries")
+                    logger.debug(
+                        f"[TaskBoard] STM auto-saved on claim: {len(_stm)} entries"
+                    )
             except Exception:
                 pass  # STM save is best-effort
 
@@ -1612,6 +1648,7 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
         # MARKER_200.CHECKPOINT: Persist session state on complete
         try:
             from src.services.session_tracker import get_session_tracker
+
             _ck_tracker = get_session_tracker()
             _ck_tracker.save_checkpoint(
                 _tracker_sid,
@@ -1650,7 +1687,8 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
 
                 with concurrent.futures.ThreadPoolExecutor() as pool:
                     result = pool.submit(
-                        asyncio.run, board.merge_request(task_id, strategy=strategy, force=force)
+                        asyncio.run,
+                        board.merge_request(task_id, strategy=strategy, force=force),
                     ).result()
             else:
                 result = loop.run_until_complete(
@@ -1671,7 +1709,9 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
         merge_commit_hash = arguments.get("commit_hash")
         role = arguments.get("role", "")
         skip_qa = arguments.get("skip_qa", False)
-        return board.promote_to_main(task_id, merge_commit_hash, role=role, skip_qa=skip_qa)
+        return board.promote_to_main(
+            task_id, merge_commit_hash, role=role, skip_qa=skip_qa
+        )
 
     # MARKER_196.QA: request_qa — move done_worktree → need_qa
     elif action == "request_qa":
@@ -1856,7 +1896,11 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
     elif action == "backfill_fts":
         board = _get_board()
         count = board._backfill_fts()
-        return {"success": True, "indexed": count, "message": f"FTS5 index rebuilt: {count} tasks indexed"}
+        return {
+            "success": True,
+            "indexed": count,
+            "message": f"FTS5 index rebuilt: {count} tasks indexed",
+        }
 
     # MARKER_199.DEBRIEF: List tasks auto-closed without debrief
     elif action == "debrief_skipped":
@@ -1870,7 +1914,10 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
         target_role = arguments.get("target_role") or arguments.get("role")
         message = arguments.get("message", "")
         if not target_role or not message:
-            return {"success": False, "error": "notify requires target_role and message"}
+            return {
+                "success": False,
+                "error": "notify requires target_role and message",
+            }
         return board.notify(
             target_role,
             message,
@@ -1888,7 +1935,12 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
             unread_only = unread_only.lower() not in ("false", "0", "no")
         limit = int(arguments.get("limit", 20))
         notifs = board.get_notifications(role, unread_only=unread_only, limit=limit)
-        return {"success": True, "notifications": notifs, "count": len(notifs), "role": role}
+        return {
+            "success": True,
+            "notifications": notifs,
+            "count": len(notifs),
+            "role": role,
+        }
 
     elif action == "ack_notifications":
         role = arguments.get("role", "") or arguments.get("target_role", "")
@@ -1906,7 +1958,10 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
         if not task_id:
             return {"success": False, "error": "task_id is required for subtask_done"}
         if not subtask_title:
-            return {"success": False, "error": "subtask_title is required for subtask_done"}
+            return {
+                "success": False,
+                "error": "subtask_title is required for subtask_done",
+            }
         return board.subtask_done(task_id, subtask_title)
 
     # MARKER_212.AGENT_ACTIVITY: tmux-based agent activity monitor
@@ -1920,15 +1975,26 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
         if not content:
             return {"success": False, "error": "remember requires content"}
         if memory_type not in ("aura", "idea", "learning", "feedback", "pattern"):
-            return {"success": False, "error": f"Invalid memory_type: {memory_type}. Use: aura, idea, learning, feedback, pattern"}
+            return {
+                "success": False,
+                "error": f"Invalid memory_type: {memory_type}. Use: aura, idea, learning, feedback, pattern",
+            }
         return board.remember(
             content=content,
             memory_type=memory_type,
             role_id=arguments.get("role", arguments.get("source_role", "")),
             project_id=arguments.get("project_id", ""),
             task_id=arguments.get("task_id", ""),
-            tags=[t.strip() for t in arguments.get("tags", "").split(",") if t.strip()] if isinstance(arguments.get("tags"), str) else (arguments.get("tags") or []),
-            trigger_keys=[k.strip() for k in arguments.get("trigger_keys", "").split(",") if k.strip()] if isinstance(arguments.get("trigger_keys"), str) else (arguments.get("trigger_keys") or []),
+            tags=[t.strip() for t in arguments.get("tags", "").split(",") if t.strip()]
+            if isinstance(arguments.get("tags"), str)
+            else (arguments.get("tags") or []),
+            trigger_keys=[
+                k.strip()
+                for k in arguments.get("trigger_keys", "").split(",")
+                if k.strip()
+            ]
+            if isinstance(arguments.get("trigger_keys"), str)
+            else (arguments.get("trigger_keys") or []),
             expires_at=arguments.get("expires_at"),
         )
 
@@ -1999,20 +2065,28 @@ def _handle_synapse(arguments: Dict[str, Any]) -> Dict[str, Any]:
     if sub == "status":
         # List all vetka-* tmux sessions
         result = subprocess.run(
-            ["tmux", "list-sessions", "-F", "#{session_name} #{session_created} #{session_attached}"],
-            capture_output=True, text=True,
+            [
+                "tmux",
+                "list-sessions",
+                "-F",
+                "#{session_name} #{session_created} #{session_attached}",
+            ],
+            capture_output=True,
+            text=True,
         )
         sessions = []
         if result.returncode == 0:
             for line in result.stdout.strip().split("\n"):
                 if line.startswith("vetka-"):
                     parts = line.split()
-                    sessions.append({
-                        "session": parts[0],
-                        "role": parts[0].replace("vetka-", ""),
-                        "created": parts[1] if len(parts) > 1 else None,
-                        "attached": parts[2] if len(parts) > 2 else "0",
-                    })
+                    sessions.append(
+                        {
+                            "session": parts[0],
+                            "role": parts[0].replace("vetka-", ""),
+                            "created": parts[1] if len(parts) > 1 else None,
+                            "attached": parts[2] if len(parts) > 2 else "0",
+                        }
+                    )
         return {"success": True, "sessions": sessions, "count": len(sessions)}
 
     if not role:
@@ -2023,7 +2097,13 @@ def _handle_synapse(arguments: Dict[str, Any]) -> Dict[str, Any]:
     if sub == "spawn":
         # Load agent info from registry
         import yaml
-        registry_path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "templates" / "agent_registry.yaml"
+
+        registry_path = (
+            Path(__file__).resolve().parent.parent.parent.parent
+            / "data"
+            / "templates"
+            / "agent_registry.yaml"
+        )
         agent_type = "claude_code"
         worktree = None
         try:
@@ -2035,72 +2115,115 @@ def _handle_synapse(arguments: Dict[str, Any]) -> Dict[str, Any]:
                     agent_type = r.get("agent_type", "claude_code")
                     break
         except Exception as exc:
-            return {"success": False, "error": f"Failed to read agent_registry.yaml: {exc}"}
+            return {
+                "success": False,
+                "error": f"Failed to read agent_registry.yaml: {exc}",
+            }
 
         if not worktree:
-            return {"success": False, "error": f"Role '{role}' not found in agent_registry.yaml or has no worktree"}
+            return {
+                "success": False,
+                "error": f"Role '{role}' not found in agent_registry.yaml or has no worktree",
+            }
 
         # Check if already running
-        check = subprocess.run(["tmux", "has-session", "-t", session_name], capture_output=True)
+        check = subprocess.run(
+            ["tmux", "has-session", "-t", session_name], capture_output=True
+        )
         if check.returncode == 0:
-            return {"success": True, "already_running": True, "session": session_name,
-                    "message": f"{role} already running in {session_name}"}
+            return {
+                "success": True,
+                "already_running": True,
+                "session": session_name,
+                "message": f"{role} already running in {session_name}",
+            }
 
         synapse_script = scripts_dir / "spawn_synapse.sh"
         if not synapse_script.exists():
-            return {"success": False, "error": f"spawn_synapse.sh not found at {synapse_script}"}
+            return {
+                "success": False,
+                "error": f"spawn_synapse.sh not found at {synapse_script}",
+            }
 
         proc = subprocess.run(
             [str(synapse_script), role, worktree, agent_type],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True,
+            text=True,
+            timeout=15,
         )
         if proc.returncode != 0:
             return {"success": False, "error": f"Spawn failed: {proc.stderr.strip()}"}
 
-        return {"success": True, "session": session_name, "agent_type": agent_type,
-                "worktree": worktree, "message": proc.stdout.strip()}
+        return {
+            "success": True,
+            "session": session_name,
+            "agent_type": agent_type,
+            "worktree": worktree,
+            "message": proc.stdout.strip(),
+        }
 
     elif sub == "write":
         prompt = arguments.get("prompt") or arguments.get("message")
         if not prompt:
-            return {"success": False, "error": "prompt or message is required for write"}
+            return {
+                "success": False,
+                "error": "prompt or message is required for write",
+            }
 
         # Check session exists
-        check = subprocess.run(["tmux", "has-session", "-t", session_name], capture_output=True)
+        check = subprocess.run(
+            ["tmux", "has-session", "-t", session_name], capture_output=True
+        )
         if check.returncode != 0:
-            return {"success": False, "error": f"No active session {session_name} — spawn agent first"}
+            return {
+                "success": False,
+                "error": f"No active session {session_name} — spawn agent first",
+            }
 
         # Try synapse_write.sh first, fall back to direct tmux send-keys
         write_script = scripts_dir / "synapse_write.sh"
         if write_script.exists():
             proc = subprocess.run(
                 [str(write_script), role, prompt],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             ok = proc.returncode == 0
         else:
             # Direct tmux send-keys fallback
             proc = subprocess.run(
                 ["tmux", "send-keys", "-t", session_name, prompt, "Enter"],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
             ok = proc.returncode == 0
 
-        return {"success": ok, "session": session_name,
-                "message": f"Sent to {role}" if ok else proc.stderr.strip()}
+        return {
+            "success": ok,
+            "session": session_name,
+            "message": f"Sent to {role}" if ok else proc.stderr.strip(),
+        }
 
     elif sub == "wake":
         # Check session exists
-        check = subprocess.run(["tmux", "has-session", "-t", session_name], capture_output=True)
+        check = subprocess.run(
+            ["tmux", "has-session", "-t", session_name], capture_output=True
+        )
         if check.returncode != 0:
-            return {"success": False, "error": f"No active session {session_name} — agent not running"}
+            return {
+                "success": False,
+                "error": f"No active session {session_name} — agent not running",
+            }
 
         # Try synapse_wake.sh first, fall back to direct tmux send-keys
         wake_script = scripts_dir / "synapse_wake.sh"
         if wake_script.exists():
             proc = subprocess.run(
                 [str(wake_script), role],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             ok = proc.returncode == 0
         else:
@@ -2108,39 +2231,60 @@ def _handle_synapse(arguments: Dict[str, Any]) -> Dict[str, Any]:
             # Exit copy-mode first ('q' is harmless if not in copy-mode)
             subprocess.run(
                 ["tmux", "send-keys", "-t", session_name, "q"],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
-            import time; time.sleep(0.1)
+            import time
+
+            time.sleep(0.1)
             wake_prompt = f"Check your notifications: vetka_task_board action=notifications role={role}"
             subprocess.run(
                 ["tmux", "send-keys", "-t", session_name, wake_prompt],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
             time.sleep(0.3)  # TUI needs time before Enter
             proc = subprocess.run(
                 ["tmux", "send-keys", "-t", session_name, "Enter"],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
             ok = proc.returncode == 0
 
-        return {"success": ok, "session": session_name,
-                "message": f"Wake sent to {role}" if ok else proc.stderr.strip()}
+        return {
+            "success": ok,
+            "session": session_name,
+            "message": f"Wake sent to {role}" if ok else proc.stderr.strip(),
+        }
 
     elif sub == "kill":
-        check = subprocess.run(["tmux", "has-session", "-t", session_name], capture_output=True)
+        check = subprocess.run(
+            ["tmux", "has-session", "-t", session_name], capture_output=True
+        )
         if check.returncode != 0:
-            return {"success": True, "message": f"{role} not running (no session {session_name})"}
+            return {
+                "success": True,
+                "message": f"{role} not running (no session {session_name})",
+            }
 
         proc = subprocess.run(
             ["tmux", "kill-session", "-t", session_name],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
-        return {"success": proc.returncode == 0, "session": session_name,
-                "message": f"{role} killed" if proc.returncode == 0 else proc.stderr.strip()}
+        return {
+            "success": proc.returncode == 0,
+            "session": session_name,
+            "message": f"{role} killed"
+            if proc.returncode == 0
+            else proc.stderr.strip(),
+        }
 
     else:
-        return {"success": False,
-                "error": f"Unknown sub-operation '{sub}'. Valid: spawn, write, wake, status, kill"}
+        return {
+            "success": False,
+            "error": f"Unknown sub-operation '{sub}'. Valid: spawn, write, wake, status, kill",
+        }
 
 
 # MARKER_195.23: Per-role debrief counter — request every 3rd task only.
@@ -2189,8 +2333,12 @@ def _inject_debrief(result: dict, arguments: dict) -> None:
             _engram = get_engram_cache()
             _d_sid = arguments.get("session_id") or "default"
             _d_role = get_session_tracker().get_role(_d_sid)
-            _d_callsign = (_d_role or {}).get("callsign", arguments.get("role", "unknown"))
-            _d_domain = (_d_role or {}).get("domain", arguments.get("domain", "unknown"))
+            _d_callsign = (_d_role or {}).get(
+                "callsign", arguments.get("role", "unknown")
+            )
+            _d_domain = (_d_role or {}).get(
+                "domain", arguments.get("domain", "unknown")
+            )
             _d_task_id = arguments.get("task_id") or result.get("task_id", "")
 
             for i, decision in enumerate(_decisions):
@@ -2205,7 +2353,9 @@ def _inject_debrief(result: dict, arguments: dict) -> None:
                     category="architecture",
                     match_count=0,
                 )
-            result["decisions_captured"] = len([d for d in _decisions if isinstance(d, str) and d.strip()])
+            result["decisions_captured"] = len(
+                [d for d in _decisions if isinstance(d, str) and d.strip()]
+            )
         except Exception:
             pass  # Decision capture is best-effort
 
@@ -2223,6 +2373,7 @@ def _inject_debrief(result: dict, arguments: dict) -> None:
     if task_id:
         try:
             from src.orchestration.task_board import get_task_board
+
             _tb = get_task_board()
             _task_meta_prefetch = _tb.get_task(task_id)
         except Exception:
@@ -2234,12 +2385,15 @@ def _inject_debrief(result: dict, arguments: dict) -> None:
         except Exception as e:
             logger.warning("[Debrief] passive report failed (non-fatal): %s", e)
 
-    threading.Thread(target=_bg_passive_report, daemon=True, name="debrief-passive").start()
+    threading.Thread(
+        target=_bg_passive_report, daemon=True, name="debrief-passive"
+    ).start()
     result["passive_report"] = True  # optimistic — thread will log if it fails
 
     # MARKER_200.STM_AUTOSAVE: Persist STM on complete (session milestone)
     try:
         from src.memory.stm_buffer import get_stm_buffer
+
         _stm = get_stm_buffer()
         if len(_stm) > 0:
             _stm.save_to_disk()
@@ -2253,6 +2407,7 @@ def _inject_debrief(result: dict, arguments: dict) -> None:
     try:
         from src.services.reflex_feedback import get_feedback_store
         from src.memory.aura_store import get_aura_store
+
         _fb = get_feedback_store()
         _summary = _fb.get_feedback_summary()
         _per_tool = _summary.get("per_tool", {})
@@ -2277,7 +2432,9 @@ def _inject_debrief(result: dict, arguments: dict) -> None:
 
 
 def _create_passive_experience_report(
-    arguments: dict, result: dict, task_meta: dict = None,
+    arguments: dict,
+    result: dict,
+    task_meta: dict = None,
 ) -> bool:
     """MARKER_196.6.3 / MARKER_198.DEBRIEF: Auto-create ExperienceReport from passive session data.
 
@@ -2359,6 +2516,7 @@ def _create_passive_experience_report(
         files_touched=list(session.files_edited)[:20],  # cap
         commits=session.tasks_completed,
         lessons_learned=lessons,
+        q2_worked=q2,
         recommendations=recommendations,
         bugs_found=bugs,
     )
@@ -2366,6 +2524,7 @@ def _create_passive_experience_report(
     # Enrich with CORTEX tool stats
     try:
         from src.services.reflex_feedback import get_reflex_feedback
+
         fb = get_reflex_feedback()
         summary = fb.get_feedback_summary()
         if summary and summary.get("total_entries", 0) > 0:
@@ -2660,8 +2819,12 @@ def _try_auto_commit(
     # (e.g., by vetka_git_commit post-hook). Prevents dirty-files error on re-complete.
     task_status = task.get("status", "")
     if task_status.startswith("done") or task_status in ("verified", "cancelled"):
-        return {"attempted": False, "success": True, "hash": task.get("commit_hash"),
-                "note": f"task already {task_status}, skip auto-commit"}
+        return {
+            "attempted": False,
+            "success": True,
+            "hash": task.get("commit_hash"),
+            "note": f"task already {task_status}, skip auto-commit",
+        }
 
     PROJECT_ROOT = Path(cwd) if cwd else Path(__file__).resolve().parents[3]
 
@@ -2928,6 +3091,7 @@ def handle_task_import(arguments: Dict[str, Any]) -> Dict[str, Any]:
 # MARKER_212.AGENT_ACTIVITY: tmux-based agent activity monitor
 # ---------------------------------------------------------------------------
 
+
 def _agent_activity(board, arguments: dict) -> dict:
     """Check all agent tmux sessions for activity. Returns per-agent status.
 
@@ -2947,7 +3111,9 @@ def _agent_activity(board, arguments: dict) -> dict:
     try:
         raw = subprocess.run(
             ["tmux", "list-sessions", "-F", "#{session_name} #{session_activity}"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if raw.returncode != 0:
             return {"success": False, "error": f"tmux error: {raw.stderr.strip()}"}
@@ -2976,10 +3142,12 @@ def _agent_activity(board, arguments: dict) -> dict:
         if status == "claimed" and assigned:
             if assigned not in claimed:
                 claimed[assigned] = []
-            claimed[assigned].append({
-                "task_id": t.get("id", ""),
-                "title": (t.get("title", ""))[:60],
-            })
+            claimed[assigned].append(
+                {
+                    "task_id": t.get("id", ""),
+                    "title": (t.get("title", ""))[:60],
+                }
+            )
 
     # 3. Build activity report
     agents = []
@@ -2994,7 +3162,9 @@ def _agent_activity(board, arguments: dict) -> dict:
             "tmux_session": f"vetka-{callsign}",
             "last_active_epoch": last_active,
             "idle_seconds": idle_secs,
-            "status": "IDLE" if is_idle else ("active" if idle_secs <= idle_threshold else "no_task"),
+            "status": "IDLE"
+            if is_idle
+            else ("active" if idle_secs <= idle_threshold else "no_task"),
             "claimed_tasks": claimed.get(callsign, []),
         }
         agents.append(entry)
@@ -3004,14 +3174,16 @@ def _agent_activity(board, arguments: dict) -> dict:
     # 4. Also report agents with claimed tasks but NO tmux session (offline)
     for callsign, tasks in claimed.items():
         if callsign not in sessions:
-            agents.append({
-                "callsign": callsign,
-                "tmux_session": None,
-                "last_active_epoch": 0,
-                "idle_seconds": -1,
-                "status": "OFFLINE",
-                "claimed_tasks": tasks,
-            })
+            agents.append(
+                {
+                    "callsign": callsign,
+                    "tmux_session": None,
+                    "last_active_epoch": 0,
+                    "idle_seconds": -1,
+                    "status": "OFFLINE",
+                    "claimed_tasks": tasks,
+                }
+            )
             idle_agents.append(callsign)
 
     return {
