@@ -1755,18 +1755,45 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
         return board.verify_task(task_id, verdict, notes, verified_by)
 
     # MARKER_191.16: close — close task without git commit, with a reason field
+    # WARNING: This bypasses closure guards! Use action=complete for proper flow.
+    # MARKER_212.SECURITY: close action now requires guard bypass confirmation
     elif action == "close":
         task_id = arguments.get("task_id")
         if not task_id:
             return {"success": False, "error": "task_id is required for close"}
         reason = arguments.get("reason", "closed")
+        force = arguments.get("force", False)
+
+        # SECURITY: Warn if not force (except for research_done, duplicate, obsolete reasons)
+        safe_reasons = {"research_done", "duplicate", "obsolete", "cancelled"}
+        if not force and reason not in safe_reasons:
+            # Require explicit confirmation or redirect to complete
+            return {
+                "success": False,
+                "error": (
+                    "action=close is DISABLED for non-safe reasons. "
+                    "Use action=complete for proper flow with git commit + guards. "
+                    f"Safe reasons: {safe_reasons}. "
+                    "Pass force=true only if you understand the risk."
+                ),
+                "hint": "Use action=complete instead",
+            }
+
         task = board.get_task(task_id)
         if not task:
             return {"success": False, "error": f"Task {task_id} not found"}
+
+        # Log warning for audit
+        logger.warning(
+            f"[TaskBoard] close action bypass for task {task_id} "
+            f"(reason={reason}, force={force}). "
+            f"Use action=complete for proper flow."
+        )
+
         updated = board.update_task(
             task_id,
             status="done_main",
-            _history_event="closed",
+            _history_event="closed_bypass",
             _history_source="task_board_close",
             _history_reason=reason,
         )
@@ -1777,10 +1804,12 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
                 "status": "done_main",
                 "closed": True,
                 "reason": reason,
+                "warning": "Bypassed closure guards! Use action=complete next time.",
             }
         return {"success": False, "error": f"Failed to close task {task_id}"}
 
     # MARKER_191.16: bulk_close — close multiple tasks at once without git commit
+    # WARNING: This bypasses closure guards! Use action=complete for proper flow.
     elif action == "bulk_close":
         task_ids = arguments.get("task_ids", [])
         if not task_ids:
@@ -1789,6 +1818,25 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
                 "error": "task_ids list is required for bulk_close",
             }
         reason = arguments.get("reason", "bulk_closed")
+        force = arguments.get("force", False)
+
+        # SECURITY: Warn if not force
+        safe_reasons = {"research_done", "duplicate", "obsolete", "cancelled"}
+        if not force and reason not in safe_reasons:
+            return {
+                "success": False,
+                "error": (
+                    "action=bulk_close is DISABLED for non-safe reasons. "
+                    "Use action=complete with task_ids=[] for proper flow. "
+                    f"Safe reasons: {safe_reasons}."
+                ),
+                "hint": "Use action=complete instead",
+            }
+
+        logger.warning(
+            f"[TaskBoard] bulk_close action bypass for {len(task_ids)} tasks"
+        )
+
         results = []
         for tid in task_ids:
             task = board.get_task(tid)
@@ -1798,7 +1846,7 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
             updated = board.update_task(
                 tid,
                 status="done_main",
-                _history_event="closed",
+                _history_event="closed_bypass",
                 _history_source="task_board_bulk_close",
                 _history_reason=reason,
             )
@@ -1809,6 +1857,7 @@ def handle_task_board(arguments: Dict[str, Any]) -> Dict[str, Any]:
             "closed_count": closed_count,
             "total": len(task_ids),
             "results": results,
+            "warning": "Bypassed closure guards!",
         }
 
     # MARKER_198.STALE: Stale detection — find pending tasks already implemented
